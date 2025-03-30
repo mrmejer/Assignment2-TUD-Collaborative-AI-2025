@@ -2,6 +2,7 @@ import logging
 from random import randint
 from time import time
 from typing import cast
+from random import sample
 
 from geniusweb.actions.Accept import Accept
 from geniusweb.actions.Action import Action
@@ -56,7 +57,7 @@ class TemplateAgent(DefaultParty):
         self.discussion_phase = 1
         self.concession_phase = 2
         self.phase_boundaries = [0.15, 0.4, 0.9]
-        self.alpha = 0.9
+        self.reservation_value = None
 
     def notifyChange(self, data: Inform):
         """MUST BE IMPLEMENTED
@@ -85,6 +86,7 @@ class TemplateAgent(DefaultParty):
             )
             self.profile = profile_connection.getProfile()
             self.domain = self.profile.getDomain()
+            self.reservation_value = self.profile.get_utility(self.profile.getReservationBid())
             profile_connection.close()
 
         # ActionDone informs you of an action (an offer or an accept)
@@ -166,39 +168,40 @@ class TemplateAgent(DefaultParty):
             self.last_received_bid = bid
 
     def my_turn(self):
-        """This method is called when it is our turn. It should decide upon an action
-        to perform and send this action to the opponent.
+        """
+        Here, we divide the negotiation in multiple phases. In the initial phase, the idea is to learn more
+        about our opponent's preferences. Therefore, we always bid the highest utility for us, and only
+        accept an offer from the opponent if the overall utility of that bid for us is above 0.9.
+        In the discussion phase, the idea is to get the best utility possible. We randomly select a uniform
+        outcome from a time dependent-set to make bids. We only accept an offer if it has an utility of above 0.8.
+        In the concession phase, the idea is to reach an agreement while still trying to get a good value for
+        the utility. For this, we used the consideration phase idea described in Akiyuki Mori Takayuki Ito. 2016. Atlas3: Anegotiating Agent Based on Expecting
+        Lower Limit of Concession Function. 169–173.
         """
         # Deciding whether to accept
-        progress = self.progress.get(time() * 1000) / 10
-        if progress < self.phase_boundaries[self.initial_phase]:
-            bid_accepted = self.accept_const(0.9, self.last_received_bid)
+        t = self.progress.get(time() * 1000)
+        progress = t / 10
+        action = None
 
-            if bid_accepted:
+        if progress < self.phase_boundaries[self.initial_phase]:
+            if self.accept_const(0.9, self.last_received_bid):
                 action = Accept(self.me, self.last_received_bid)
-            if not bid_accepted:
-                action = Offer(self.me,  self.find_best_bid())
+            else:
+                action = Offer(self.me,  self.best_bid())
 
         elif progress < self.phase_boundaries[self.discussion_phase]:
-            pass
+            if self.accept_const(0.8, self.last_received_bid):
+                action = Accept(self.me, self.last_received_bid)
+            else:
+                action = Offer(self.me,  self.sample_bid_above_time_bound(t))
 
         elif progress < self.phase_boundaries[self.concession_phase]:
-            pass
+            if self.accept_Atlas3(self.last_received_bid, progress):
+                action = Accept(self.me, self.last_received_bid)
+            else:
+                action = Offer(self.me, self.random_bid_above_best_join_utility(t))
 
         self.send_action(action)
-
-        # Offer is not accepted -> find a bid
-
-        # check if the last received offer is good enough
-        # if self.accept_condition(self.last_received_bid):
-        #     # if so, accept the offer
-        #     action = Accept(self.me, self.last_received_bid)
-        # else:
-        #     # if not, find a bid to propose as counter offer
-        #     bid = self.find_bid()
-        #     action = Offer(self.me, bid)
-        # send the action
-        # self.send_action(action)
 
     def accept_const(self, alpha: float, bid: Bid) -> bool:
         """Accept if the utility offered by the opponent is higher than a constant alpha"""
@@ -206,8 +209,44 @@ class TemplateAgent(DefaultParty):
             return False
         return self.profile.getUtility(bid) > alpha
 
-    def find_best_bid(self):
-        """finding omega_best - greedily offer with the highest utility for us, regardless of opponent's preferences"""
+    def accept_Atlas3(self, bid: Bid, t: float) -> bool:
+        """
+        Accepting strategy implemented from Akiyuki Mori Takayuki Ito. 2016. Atlas3: Anegotiating Agent Based on Expecting
+        Lower Limit of Concession Function. 169–173.
+        """
+        f_omega_bestOffered = max([self.profile.getUtility(opponentBid) for opponentBid in self.opponent_model.offers])
+        f_omega_reserve = self.reservation_value
+
+        u_CH = max(f_omega_reserve, f_omega_bestOffered) # if we're conceder and they are hardliner
+        u_HH = f_omega_reserve # if both are hardliner we won't ever get anything better than reserve at the end
+        u_HC = 1 # if we're hardliner and they're conceder we assume we can get max utility
+        u_CC = 0.5 * u_CH + 0.5 * u_HC # if we're conceders we assume each can concede with equal probability
+
+        q = 1 / (1 + ((u_CH - u_HH) / (u_HC - u_CC))) # q \in [0, 1]
+        E_u_final = q * u_CH + (1 - q) * u_CC
+        alpha = 1 - t * (1 - E_u_final)
+
+        return self.profile.getUtility(bid) > alpha
+
+    def random_bid_above_best_join_utility(self, t: float):
+        """Computes a time dependent joint utility distribution,
+        fins the best possible joint utility from it (corresponding to an offer favourable to both parties) - f_omega_maxJoint
+        and then randomly samples a bid from among bids that have larger utility that f_omega_maxJoint
+        """
+        joint_util = lambda omega: ((1.8 - 0.3 * t**2) * self.profile.getUtility(omega)
+                                   + self.opponent_model.get_predicted_utility(omega))
+        domain = self.profile.getDomain()
+        all_bids = AllBidsList(domain)
+
+        u_joint = [joint_util(all_bids.get(i)) for i in range(0, all_bids.size() - 1)]
+        f_omega_maxJoint = max(u_joint)
+
+        return sample([all_bids.get(i) for i in range(0, all_bids.size() - 1) if self.profile.getUtility(all_bids.get(i)) >= f_omega_maxJoint])
+
+    def best_bid(self):
+        """
+        finding omega_best - greedily offer with the highest utility for us, regardless of opponent's preferences
+        """
         domain = self.profile.getDomain()
         all_bids = AllBidsList(domain)
         best_bid_score = 0
@@ -220,6 +259,20 @@ class TemplateAgent(DefaultParty):
                 best_bid_score, best_bid = bid_score, bid
         return best_bid
 
+    def sample_bid_above_time_bound(self, t):
+        """
+        This method is called to generate random bids in the discussion phase of the negotiation.
+        The bids have a lower bound that it's time-dependent. The lower bound decreases for each bid, up
+        until a set lower bound of the maximum between our reservation bid and a utility of 0.6.
+        """
+        domain = self.profile.getDomain()
+        all_bids = AllBidsList(domain)
+        omegas = [all_bids.get(i) for i in range(0, all_bids.size() - 1)]
+        omegas_filtered = [omega for omega in omegas if self.profile.getUtility(omega) >
+                           max((self.phase_boundaries[self.discussion_phase] - self.phase_boundaries[self.initial_phase] * t**2),
+                               max(self.reservation_value, 0.6))]
+
+        return sample(omegas_filtered, k=1)[0]  # uniformly sample
 
     def save_data(self):
         """This method is called after the negotiation is finished. It can be used to store data
@@ -233,8 +286,6 @@ class TemplateAgent(DefaultParty):
     ###########################################################################################
     ################################## Example methods below ##################################
     ###########################################################################################
-
-
     def find_bid(self) -> Bid:
         # compose a list of all possible bids
         domain = self.profile.getDomain()
