@@ -3,6 +3,7 @@ from random import randint
 from time import time
 from typing import cast
 from random import sample
+from decimal import Decimal
 
 from geniusweb.actions.Accept import Accept
 from geniusweb.actions.Action import Action
@@ -86,7 +87,8 @@ class TemplateAgent(DefaultParty):
             )
             self.profile = profile_connection.getProfile()
             self.domain = self.profile.getDomain()
-            self.reservation_value = self.profile.get_utility(self.profile.getReservationBid())
+            reservation_bid = self.profile.getReservationBid()
+            self.reservation_value = self.profile.getUtility(reservation_bid) if reservation_bid is not None else 0
             profile_connection.close()
 
         # ActionDone informs you of an action (an offer or an accept)
@@ -180,7 +182,7 @@ class TemplateAgent(DefaultParty):
         """
         # Deciding whether to accept
         t = self.progress.get(time() * 1000)
-        progress = t / 10
+        progress = t
         action = None
 
         if progress < self.phase_boundaries[self.initial_phase]:
@@ -214,17 +216,17 @@ class TemplateAgent(DefaultParty):
         Accepting strategy implemented from Akiyuki Mori Takayuki Ito. 2016. Atlas3: Anegotiating Agent Based on Expecting
         Lower Limit of Concession Function. 169–173.
         """
-        f_omega_bestOffered = max([self.profile.getUtility(opponentBid) for opponentBid in self.opponent_model.offers])
+        f_omega_bestOffered = Decimal(max([self.profile.getUtility(opponentBid) for opponentBid in self.opponent_model.offers]))
         f_omega_reserve = self.reservation_value
 
         u_CH = max(f_omega_reserve, f_omega_bestOffered) # if we're conceder and they are hardliner
         u_HH = f_omega_reserve # if both are hardliner we won't ever get anything better than reserve at the end
-        u_HC = 1 # if we're hardliner and they're conceder we assume we can get max utility
-        u_CC = 0.5 * u_CH + 0.5 * u_HC # if we're conceders we assume each can concede with equal probability
+        u_HC = Decimal(1) # if we're hardliner and they're conceder we assume we can get max utility
+        u_CC = Decimal('0.5') * u_CH + Decimal('0.5') * u_HC # if we're conceders we assume each can concede with equal probability
 
         q = 1 / (1 + ((u_CH - u_HH) / (u_HC - u_CC))) # q \in [0, 1]
         E_u_final = q * u_CH + (1 - q) * u_CC
-        alpha = 1 - t * (1 - E_u_final)
+        alpha = 1 - Decimal(t) * (1 - Decimal(E_u_final))
 
         return self.profile.getUtility(bid) > alpha
 
@@ -233,15 +235,15 @@ class TemplateAgent(DefaultParty):
         fins the best possible joint utility from it (corresponding to an offer favourable to both parties) - f_omega_maxJoint
         and then randomly samples a bid from among bids that have larger utility that f_omega_maxJoint
         """
-        joint_util = lambda omega: ((1.8 - 0.3 * t**2) * self.profile.getUtility(omega)
-                                   + self.opponent_model.get_predicted_utility(omega))
+        joint_util = lambda omega: ((Decimal('1.8') - Decimal('0.3') * (Decimal(t)**2)) * self.profile.getUtility(omega)
+                                   + Decimal(self.opponent_model.get_predicted_utility(omega)))
         domain = self.profile.getDomain()
         all_bids = AllBidsList(domain)
 
-        u_joint = [joint_util(all_bids.get(i)) for i in range(0, all_bids.size() - 1)]
+        u_joint = [joint_util(all_bids.get(i)) for i in range(0, all_bids.size())]
         f_omega_maxJoint = max(u_joint)
 
-        return sample([all_bids.get(i) for i in range(0, all_bids.size() - 1) if self.profile.getUtility(all_bids.get(i)) >= f_omega_maxJoint])
+        return sample([all_bids.get(i) for i in range(0, all_bids.size()) if self.profile.getUtility(all_bids.get(i)) >= f_omega_maxJoint], k = 1)[0]
 
     def best_bid(self):
         """
