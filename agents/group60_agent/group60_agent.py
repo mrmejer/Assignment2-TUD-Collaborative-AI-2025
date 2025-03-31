@@ -29,6 +29,7 @@ from geniusweb.progress.ProgressTime import ProgressTime
 from geniusweb.references.Parameters import Parameters
 from tudelft_utilities_logging.ReportToLogger import ReportToLogger
 
+from .utils.final_phase_plan import FinalPhasePlan
 from .utils.opponent_model import OpponentModel
 
 
@@ -57,7 +58,7 @@ class Group60Agent(DefaultParty):
         self.initial_phase = 0
         self.discussion_phase = 1
         self.concession_phase = 2
-        self.phase_boundaries = [0.15, 0.4, 0.9]
+        self.phase_boundaries = [0.3, 0.6, 0.9]
         self.reservation_value = None
 
         self.final_phase_plan: FinalPhasePlan = None
@@ -199,7 +200,7 @@ class Group60Agent(DefaultParty):
         self.logger.log(logging.INFO, f"Progress: {progress}, Est. bids left: {bids_left}")
         action = None
 
-        if self.final_phase_plan is not None or (self.total_bids > 100 and bids_left < 10): # final phase
+        if self.final_phase_plan is not None or (self.total_bids > 100 and bids_left < 15): # final phase
             if self.final_phase_plan is None:
                 self.final_phase_plan = FinalPhasePlan(self.profile, self.opponent_model, bids_left, self.logger)
 
