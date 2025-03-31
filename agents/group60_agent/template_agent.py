@@ -233,7 +233,7 @@ class TemplateAgent(DefaultParty):
     def random_bid_above_best_join_utility(self, t: float):
         """Computes a time dependent joint utility distribution,
         fins the best possible joint utility from it (corresponding to an offer favourable to both parties) - f_omega_maxJoint
-        and then randomly samples a bid from among bids that have larger utility that f_omega_maxJoint
+        and then randomly samples a bid from among bids that have larger utility that omega_maxJoint
         """
         joint_util = lambda omega: ((Decimal('1.8') - Decimal('0.3') * (Decimal(t)**2)) * self.profile.getUtility(omega)
                                    + Decimal(self.opponent_model.get_predicted_utility(omega)))
@@ -241,9 +241,10 @@ class TemplateAgent(DefaultParty):
         all_bids = AllBidsList(domain)
 
         u_joint = [joint_util(all_bids.get(i)) for i in range(0, all_bids.size())]
-        f_omega_maxJoint = max(u_joint)
+        omega_maxJoint = all_bids.get(u_joint.index(max(u_joint)))  # argmax
 
-        return sample([all_bids.get(i) for i in range(0, all_bids.size()) if self.profile.getUtility(all_bids.get(i)) >= f_omega_maxJoint], k = 1)[0]
+        bids_better_than_omega_maxJoint = [all_bids.get(i) for i in range(0, all_bids.size()) if self.profile.getUtility(all_bids.get(i)) >= self.profile.getUtility(omega_maxJoint)]
+        return sample(bids_better_than_omega_maxJoint, k=1)[0]
 
     def best_bid(self):
         """
