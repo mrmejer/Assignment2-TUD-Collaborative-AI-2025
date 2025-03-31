@@ -29,10 +29,11 @@ from geniusweb.progress.ProgressTime import ProgressTime
 from geniusweb.references.Parameters import Parameters
 from tudelft_utilities_logging.ReportToLogger import ReportToLogger
 
+from .utils.final_phase_plan import FinalPhasePlan
 from .utils.opponent_model import OpponentModel
 
 
-class TemplateAgent(DefaultParty):
+class Group60Agent(DefaultParty):
     """
     Template of a Python geniusweb agent.
     """
@@ -57,8 +58,13 @@ class TemplateAgent(DefaultParty):
         self.initial_phase = 0
         self.discussion_phase = 1
         self.concession_phase = 2
-        self.phase_boundaries = [0.15, 0.4, 0.9]
+        self.phase_boundaries = [0.3, 0.6, 0.9]
         self.reservation_value = None
+
+        self.final_phase_plan: FinalPhasePlan = None
+        self.last_action_time: float = 0.0
+        self.average_reaction_time: float = 0.0
+        self.total_bids: int = 0
 
     def notifyChange(self, data: Inform):
         """MUST BE IMPLEMENTED
@@ -169,6 +175,10 @@ class TemplateAgent(DefaultParty):
             # set bid as last received
             self.last_received_bid = bid
 
+    def estimate_bids_left(self) -> int:
+        progress = self.progress.get(time() * 1000)
+        return int((1.0 - progress) / self.average_reaction_time)
+
     def my_turn(self):
         """
         Here, we divide the negotiation in multiple phases. In the initial phase, the idea is to learn more
@@ -183,25 +193,44 @@ class TemplateAgent(DefaultParty):
         # Deciding whether to accept
         t = self.progress.get(time() * 1000)
         progress = t
+
+        self.average_reaction_time = self.average_reaction_time * 0.9 + 0.1 * (progress - self.last_action_time)
+
+        bids_left = self.estimate_bids_left()
+        self.logger.log(logging.INFO, f"Progress: {progress}, Est. bids left: {bids_left}")
         action = None
 
-        if progress < self.phase_boundaries[self.initial_phase]:
-            if self.accept_const(0.9, self.last_received_bid):
-                action = Accept(self.me, self.last_received_bid)
-            else:
-                action = Offer(self.me,  self.best_bid())
+        if self.final_phase_plan is not None or (self.total_bids > 100 and bids_left < 15): # final phase
+            if self.final_phase_plan is None:
+                self.final_phase_plan = FinalPhasePlan(self.profile, self.opponent_model, bids_left, self.logger)
 
-        elif progress < self.phase_boundaries[self.discussion_phase]:
-            if self.accept_const(0.8, self.last_received_bid):
+            if self.final_phase_plan.current_EU() <= self.profile.getUtility(self.last_received_bid):
                 action = Accept(self.me, self.last_received_bid)
             else:
-                action = Offer(self.me,  self.sample_bid_above_time_bound(t))
+                action = Offer(self.me, self.final_phase_plan.next_bid())
 
-        elif progress < self.phase_boundaries[self.concession_phase]:
-            if self.accept_Atlas3(self.last_received_bid, progress):
-                action = Accept(self.me, self.last_received_bid)
-            else:
-                action = Offer(self.me, self.random_bid_above_best_join_utility(t))
+        else:
+
+            if progress < self.phase_boundaries[self.initial_phase]:
+                if self.accept_const(0.9, self.last_received_bid):
+                    action = Accept(self.me, self.last_received_bid)
+                else:
+                    action = Offer(self.me,  self.best_bid())
+
+            elif progress < self.phase_boundaries[self.discussion_phase]:
+                if self.accept_const(0.8, self.last_received_bid):
+                    action = Accept(self.me, self.last_received_bid)
+                else:
+                    action = Offer(self.me,  self.sample_bid_above_time_bound(t))
+
+            elif progress < self.phase_boundaries[self.concession_phase]:
+                if self.accept_Atlas3(self.last_received_bid, progress):
+                    action = Accept(self.me, self.last_received_bid)
+                else:
+                    action = Offer(self.me, self.random_bid_above_best_join_utility(t))
+
+        self.total_bids = self.total_bids + 1
+        self.last_action_time = self.progress.get(time() * 1000)
 
         self.send_action(action)
 
