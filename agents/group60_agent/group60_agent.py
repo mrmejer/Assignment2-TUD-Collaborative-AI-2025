@@ -58,7 +58,7 @@ class Group60Agent(DefaultParty):
         self.initial_phase = 0
         self.discussion_phase = 1
         self.concession_phase = 2
-        self.phase_boundaries = [0.3, 0.6, 0.9]
+        self.phase_boundaries = [0.3, 0.6, 1]
         self.reservation_value = None
 
         self.final_phase_plan: FinalPhasePlan = None
