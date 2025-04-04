@@ -194,7 +194,7 @@ class Group60Agent(DefaultParty):
         t = self.progress.get(time() * 1000)
         progress = t
 
-        self.average_reaction_time = self.average_reaction_time * 0.9 + 0.1 * (progress - self.last_action_time)
+        self.average_reaction_time = self.average_reaction_time * 0.75 + 0.25 * (progress - self.last_action_time)
 
         bids_left = self.estimate_bids_left()
         self.logger.log(logging.INFO, f"Progress: {progress}, Est. bids left: {bids_left}")
