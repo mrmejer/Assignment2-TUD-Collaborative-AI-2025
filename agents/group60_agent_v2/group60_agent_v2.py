@@ -29,11 +29,10 @@ from geniusweb.progress.ProgressTime import ProgressTime
 from geniusweb.references.Parameters import Parameters
 from tudelft_utilities_logging.ReportToLogger import ReportToLogger
 
-from .utils.final_phase_plan import FinalPhasePlan
 from .utils.opponent_model import OpponentModel
 
 
-class Group60AgentOld(DefaultParty):
+class Group60AgentV2(DefaultParty):
     """
     Template of a Python geniusweb agent.
     """
